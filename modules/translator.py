@@ -6,6 +6,9 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
+import hashlib
+import json
+from pathlib import Path
 import aiohttp
 from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
@@ -13,6 +16,56 @@ from rich.console import Console
 from rich.progress import Progress, TaskID
 
 console = Console()
+
+
+class TranslationCache:
+    """Simple file-based translation cache"""
+    
+    def __init__(self, cache_dir: Optional[Path] = None):
+        """
+        Initialize translation cache
+        
+        Args:
+            cache_dir: Directory to store cache files
+        """
+        self.cache_dir = cache_dir or Path.home() / ".vcg_cache" / "translations"
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_file = self.cache_dir / "translation_cache.json"
+        self._load_cache()
+    
+    def _load_cache(self):
+        """Load cache from file"""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self.cache = json.load(f)
+            except:
+                self.cache = {}
+        else:
+            self.cache = {}
+    
+    def _save_cache(self):
+        """Save cache to file"""
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.cache, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to save translation cache: {e}[/yellow]")
+    
+    def get(self, key: str) -> Optional[str]:
+        """Get translation from cache"""
+        return self.cache.get(key)
+    
+    def set(self, key: str, value: str):
+        """Set translation in cache"""
+        self.cache[key] = value
+        self._save_cache()
+    
+    def clear(self):
+        """Clear all cache"""
+        self.cache = {}
+        if self.cache_file.exists():
+            self.cache_file.unlink()
 
 
 @dataclass
@@ -43,7 +96,8 @@ class Translator(ABC):
         api_key: str,
         target_language: str = "zh",
         max_retries: int = 3,
-        timeout: int = 30
+        timeout: int = 30,
+        use_cache: bool = True
     ):
         """
         Initialize translator
@@ -53,11 +107,14 @@ class Translator(ABC):
             target_language: Target language code
             max_retries: Maximum number of retry attempts
             timeout: Request timeout in seconds
+            use_cache: Whether to use translation cache
         """
         self.api_key = api_key
         self.target_language = target_language
         self.max_retries = max_retries
         self.timeout = timeout
+        self.use_cache = use_cache
+        self.cache = TranslationCache() if use_cache else None
     
     @abstractmethod
     async def translate_text(self, text: str, source_lang: Optional[str] = None) -> str:
@@ -100,6 +157,11 @@ class Translator(ABC):
         }
         return language_map.get(code, code)
     
+    def _get_cache_key(self, text: str, source_lang: Optional[str], target_lang: str) -> str:
+        """Generate cache key for translation"""
+        cache_string = f"{text}_{source_lang or 'auto'}_{target_lang}"
+        return hashlib.md5(cache_string.encode()).hexdigest()
+    
     def _split_long_text(self, text: str, max_length: int = 4000) -> List[str]:
         """Split long text into smaller chunks"""
         if len(text) <= max_length:
@@ -134,9 +196,10 @@ class OpenAITranslator(Translator):
         target_language: str = "zh",
         model: str = "gpt-4-turbo-preview",
         max_retries: int = 3,
-        timeout: int = 30
+        timeout: int = 30,
+        use_cache: bool = True
     ):
-        super().__init__(api_key, target_language, max_retries, timeout)
+        super().__init__(api_key, target_language, max_retries, timeout, use_cache)
         self.model = model
         self.client = AsyncOpenAI(api_key=api_key, timeout=timeout)
     
@@ -144,6 +207,13 @@ class OpenAITranslator(Translator):
         """Translate text using OpenAI API"""
         if not text.strip():
             return ""
+        
+        # Check cache first
+        if self.cache:
+            cache_key = self._get_cache_key(text, source_lang, self.target_language)
+            cached_translation = self.cache.get(cache_key)
+            if cached_translation:
+                return cached_translation
         
         target_lang_name = self._get_language_name(self.target_language)
         
@@ -173,6 +243,11 @@ class OpenAITranslator(Translator):
                 )
                 
                 translated = response.choices[0].message.content.strip()
+                
+                # Save to cache
+                if self.cache:
+                    self.cache.set(cache_key, translated)
+                
                 return translated
                 
             except Exception as e:
@@ -232,9 +307,10 @@ class ClaudeTranslator(Translator):
         target_language: str = "zh",
         model: str = "claude-3-opus-20240229",
         max_retries: int = 3,
-        timeout: int = 30
+        timeout: int = 30,
+        use_cache: bool = True
     ):
-        super().__init__(api_key, target_language, max_retries, timeout)
+        super().__init__(api_key, target_language, max_retries, timeout, use_cache)
         self.model = model
         self.client = AsyncAnthropic(api_key=api_key, timeout=timeout)
     
@@ -242,6 +318,13 @@ class ClaudeTranslator(Translator):
         """Translate text using Claude API"""
         if not text.strip():
             return ""
+        
+        # Check cache first
+        if self.cache:
+            cache_key = self._get_cache_key(text, source_lang, self.target_language)
+            cached_translation = self.cache.get(cache_key)
+            if cached_translation:
+                return cached_translation
         
         target_lang_name = self._get_language_name(self.target_language)
         
@@ -271,6 +354,11 @@ class ClaudeTranslator(Translator):
                 
                 # Extract text from response
                 translated = response.content[0].text.strip()
+                
+                # Save to cache
+                if self.cache:
+                    self.cache.set(cache_key, translated)
+                
                 return translated
                 
             except Exception as e:
