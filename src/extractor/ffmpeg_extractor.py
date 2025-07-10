@@ -1,7 +1,7 @@
 """音频提取模块 - 使用 FFmpeg 从视频中提取音频"""
 import subprocess
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Any
 import ffmpeg
 from src.utils.helpers import setup_logger, ensure_dir, get_output_path
 from src.config.settings import get_settings
@@ -30,7 +30,7 @@ class AudioExtractor:
             logger.error("FFmpeg 未安装或不在 PATH 中")
             return False
     
-    def get_video_info(self, video_path: Path) -> Dict[str, any]:
+    def get_video_info(self, video_path: Path) -> Dict[str, Any]:
         """获取视频信息"""
         try:
             probe = ffmpeg.probe(str(video_path))

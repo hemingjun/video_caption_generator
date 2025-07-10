@@ -40,6 +40,11 @@ def get_file_hash(file_path: Path) -> str:
     return hash_md5.hexdigest()
 
 
+def get_file_size(file_path: Path) -> int:
+    """获取文件大小（字节）"""
+    return file_path.stat().st_size
+
+
 def is_video_file(file_path: Path) -> bool:
     """检查是否为支持的视频文件"""
     video_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv'}
@@ -105,3 +110,63 @@ def get_output_path(
     base_name = input_path.stem
     output_name = f"{base_name}{suffix}"
     return output_dir / output_name
+
+
+def process_path_arguments(path_segments: tuple) -> Path:
+    """处理可能被空格分割的路径参数
+    
+    Args:
+        path_segments: 路径片段元组
+        
+    Returns:
+        完整的路径对象
+        
+    Raises:
+        click.BadParameter: 如果无法找到有效路径
+    """
+    import click
+    
+    if not path_segments:
+        raise click.BadParameter("No path provided")
+    
+    # 如果只有一个片段，直接处理
+    if len(path_segments) == 1:
+        path = Path(path_segments[0])
+        if path.exists():
+            return path
+        raise click.BadParameter(f"Path does not exist: {path}")
+    
+    # 尝试不同的拼接方式
+    # 1. 直接用空格拼接所有片段
+    full_path = " ".join(path_segments)
+    path = Path(full_path)
+    if path.exists():
+        return path
+    
+    # 2. 处理可能的选项参数混入
+    # 找到第一个以 -- 开头的参数位置
+    path_parts = []
+    for segment in path_segments:
+        if segment.startswith('-'):
+            break
+        path_parts.append(segment)
+    
+    if path_parts:
+        full_path = " ".join(path_parts)
+        path = Path(full_path)
+        if path.exists():
+            return path
+    
+    # 3. 尝试处理转义的反斜杠（如果是从终端拖拽）
+    # 将 "San\ Diego.mp4" 转换为 "San Diego.mp4"
+    escaped_path = " ".join(path_segments).replace('\\ ', ' ')
+    path = Path(escaped_path)
+    if path.exists():
+        return path
+    
+    # 如果都失败了，提供有用的错误信息
+    attempted_path = " ".join(path_segments)
+    raise click.BadParameter(
+        f"Cannot find file: {attempted_path}\n"
+        f"Please check the file path and try again."
+    )
