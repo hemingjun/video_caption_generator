@@ -9,6 +9,9 @@ import torch
 from rich.console import Console
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 from dataclasses import dataclass
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+from performance_config import PerformanceConfig
 
 console = Console()
 
@@ -164,19 +167,30 @@ class SpeechRecognizer:
         console.print(f"Transcribing audio: {audio_path.name}")
         
         try:
-            # Default parameters
+            # Get optimal compute type
+            compute_type = PerformanceConfig.get_whisper_compute_type(
+                self.model_name,
+                self.device == "cuda"
+            )
+            
+            # Default parameters with performance optimizations
             transcribe_params = {
                 'language': language,
                 'task': task,
                 'verbose': False,
-                'temperature': 0,
+                'temperature': 0,  # Use deterministic decoding for consistency
                 'compression_ratio_threshold': 2.4,
                 'logprob_threshold': -1.0,
                 'no_speech_threshold': 0.6,
                 'condition_on_previous_text': True,
                 'initial_prompt': None,
-                'word_timestamps': False
+                'word_timestamps': False,
+                'beam_size': PerformanceConfig.WHISPER_BEAM_SIZE,
+                'best_of': PerformanceConfig.WHISPER_BEST_OF,
             }
+            
+            # Check if we should use VAD (Voice Activity Detection)
+            # Note: This would require additional implementation
             
             # Update with user parameters
             transcribe_params.update(kwargs)

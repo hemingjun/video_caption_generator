@@ -67,7 +67,9 @@ class AudioExtractor:
         output_path: Optional[Union[str, Path]] = None,
         sample_rate: int = 16000,
         channels: int = 1,
-        show_progress: bool = True
+        show_progress: bool = True,
+        start_time: Optional[float] = None,
+        duration: Optional[float] = None
     ) -> Path:
         """
         Extract audio from video and convert to WAV format
@@ -107,7 +109,13 @@ class AudioExtractor:
                 raise ValueError(f"No audio stream found in video: {video_path}")
             
             # Build ffmpeg command
-            stream = ffmpeg.input(str(video_path))
+            input_kwargs = {}
+            if start_time is not None:
+                input_kwargs['ss'] = start_time
+            if duration is not None:
+                input_kwargs['t'] = duration
+                
+            stream = ffmpeg.input(str(video_path), **input_kwargs)
             stream = ffmpeg.output(
                 stream,
                 str(output_path),
@@ -219,3 +227,26 @@ class AudioExtractor:
                 temp_file.unlink()
             except Exception as e:
                 console.print(f"[yellow]Warning:[/yellow] Failed to delete {temp_file}: {e}")
+    
+    def _is_valid_video_format(self, video_path: Path) -> bool:
+        """Check if video format is supported"""
+        return video_path.suffix.lower() in self.SUPPORTED_VIDEO_FORMATS
+    
+    def get_video_duration(self, video_path: Union[str, Path]) -> float:
+        """
+        Get video duration in seconds
+        
+        Args:
+            video_path: Path to video file
+            
+        Returns:
+            Duration in seconds
+        """
+        video_path = Path(video_path)
+        
+        try:
+            probe = ffmpeg.probe(str(video_path))
+            duration = float(probe['format']['duration'])
+            return duration
+        except Exception as e:
+            raise RuntimeError(f"Failed to get video duration: {str(e)}")

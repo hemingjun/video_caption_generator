@@ -14,6 +14,11 @@ from openai import AsyncOpenAI
 from anthropic import AsyncAnthropic
 from rich.console import Console
 from rich.progress import Progress, TaskID
+import time
+from concurrent.futures import ThreadPoolExecutor
+import sys
+sys.path.append(str(Path(__file__).parent.parent))
+from performance_config import PerformanceConfig
 
 console = Console()
 
@@ -262,38 +267,88 @@ class OpenAITranslator(Translator):
         progress: Optional[Progress] = None,
         task_id: Optional[TaskID] = None
     ) -> List[TranslationSegment]:
-        """Translate multiple segments with batching"""
+        """Translate multiple segments with optimized batching"""
         if not segments:
             return []
         
-        # Group segments for batch translation
-        batch_size = 10
-        batches = [segments[i:i + batch_size] for i in range(0, len(segments), batch_size)]
+        # Get optimal batch size from performance config
+        batch_size = PerformanceConfig.get_optimal_batch_size(len(segments))
         
+        # Group segments for batch translation
+        batches = []
+        current_batch = []
+        current_length = 0
+        
+        for seg in segments:
+            seg_length = len(seg.text)
+            
+            # Check if adding this segment would exceed limits
+            if (len(current_batch) >= batch_size or 
+                current_length + seg_length > PerformanceConfig.MAX_TEXT_LENGTH_PER_REQUEST):
+                if current_batch:
+                    batches.append(current_batch)
+                current_batch = [seg]
+                current_length = seg_length
+            else:
+                current_batch.append(seg)
+                current_length += seg_length
+        
+        if current_batch:
+            batches.append(current_batch)
+        
+        # Process batches concurrently with limited concurrency
+        semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
         translated_segments = []
         
-        for batch_idx, batch in enumerate(batches):
-            # Combine texts with markers
-            combined_text = "\n---\n".join([seg.text for seg in batch])
-            
-            # Translate combined text
-            translated_combined = await self.translate_text(combined_text, source_lang)
-            
-            # Split translated text
-            translated_parts = translated_combined.split("\n---\n")
-            
-            # Assign translations back to segments
-            for i, seg in enumerate(batch):
-                if i < len(translated_parts):
-                    seg.translated_text = translated_parts[i].strip()
-                else:
-                    seg.translated_text = seg.text  # Fallback
-                translated_segments.append(seg)
-            
-            # Update progress
-            if progress and task_id is not None:
-                completed = (batch_idx + 1) * batch_size
-                progress.update(task_id, completed=min(completed, len(segments)))
+        async def translate_batch_with_semaphore(batch, batch_idx):
+            async with semaphore:
+                # Add delay between batches to avoid rate limits
+                if batch_idx > 0:
+                    await asyncio.sleep(0.5)
+                
+                # Combine texts with markers
+                combined_text = "\n---\n".join([seg.text for seg in batch])
+                
+                # Translate with retry logic
+                for attempt in range(PerformanceConfig.TRANSLATION_MAX_RETRIES):
+                    try:
+                        translated_combined = await asyncio.wait_for(
+                            self.translate_text(combined_text, source_lang),
+                            timeout=PerformanceConfig.TRANSLATION_TIMEOUT
+                        )
+                        break
+                    except asyncio.TimeoutError:
+                        if attempt == PerformanceConfig.TRANSLATION_MAX_RETRIES - 1:
+                            translated_combined = combined_text  # Fallback to original
+                        else:
+                            await asyncio.sleep(PerformanceConfig.TRANSLATION_RETRY_DELAY * (attempt + 1))
+                
+                # Split translated text
+                translated_parts = translated_combined.split("\n---\n")
+                
+                # Assign translations back to segments
+                batch_results = []
+                for i, seg in enumerate(batch):
+                    if i < len(translated_parts):
+                        seg.translated_text = translated_parts[i].strip()
+                    else:
+                        seg.translated_text = seg.text  # Fallback
+                    batch_results.append(seg)
+                
+                # Update progress
+                if progress and task_id is not None:
+                    completed = sum(len(b) for b in batches[:batch_idx + 1])
+                    progress.update(task_id, completed=min(completed, len(segments)))
+                
+                return batch_results
+        
+        # Process all batches
+        tasks = [translate_batch_with_semaphore(batch, idx) for idx, batch in enumerate(batches)]
+        batch_results = await asyncio.gather(*tasks)
+        
+        # Flatten results
+        for batch_result in batch_results:
+            translated_segments.extend(batch_result)
         
         return translated_segments
 
@@ -373,38 +428,88 @@ class ClaudeTranslator(Translator):
         progress: Optional[Progress] = None,
         task_id: Optional[TaskID] = None
     ) -> List[TranslationSegment]:
-        """Translate multiple segments with batching"""
+        """Translate multiple segments with optimized batching"""
         if not segments:
             return []
         
-        # Similar implementation to OpenAI
-        batch_size = 10
-        batches = [segments[i:i + batch_size] for i in range(0, len(segments), batch_size)]
+        # Get optimal batch size from performance config
+        batch_size = PerformanceConfig.get_optimal_batch_size(len(segments))
         
+        # Group segments for batch translation
+        batches = []
+        current_batch = []
+        current_length = 0
+        
+        for seg in segments:
+            seg_length = len(seg.text)
+            
+            # Check if adding this segment would exceed limits
+            if (len(current_batch) >= batch_size or 
+                current_length + seg_length > PerformanceConfig.MAX_TEXT_LENGTH_PER_REQUEST):
+                if current_batch:
+                    batches.append(current_batch)
+                current_batch = [seg]
+                current_length = seg_length
+            else:
+                current_batch.append(seg)
+                current_length += seg_length
+        
+        if current_batch:
+            batches.append(current_batch)
+        
+        # Process batches concurrently with limited concurrency
+        semaphore = asyncio.Semaphore(3)  # Limit concurrent API calls
         translated_segments = []
         
-        for batch_idx, batch in enumerate(batches):
-            # Combine texts with markers
-            combined_text = "\n---\n".join([seg.text for seg in batch])
-            
-            # Translate combined text
-            translated_combined = await self.translate_text(combined_text, source_lang)
-            
-            # Split translated text
-            translated_parts = translated_combined.split("\n---\n")
-            
-            # Assign translations back to segments
-            for i, seg in enumerate(batch):
-                if i < len(translated_parts):
-                    seg.translated_text = translated_parts[i].strip()
-                else:
-                    seg.translated_text = seg.text  # Fallback
-                translated_segments.append(seg)
-            
-            # Update progress
-            if progress and task_id is not None:
-                completed = (batch_idx + 1) * batch_size
-                progress.update(task_id, completed=min(completed, len(segments)))
+        async def translate_batch_with_semaphore(batch, batch_idx):
+            async with semaphore:
+                # Add delay between batches to avoid rate limits
+                if batch_idx > 0:
+                    await asyncio.sleep(0.5)
+                
+                # Combine texts with markers
+                combined_text = "\n---\n".join([seg.text for seg in batch])
+                
+                # Translate with retry logic
+                for attempt in range(PerformanceConfig.TRANSLATION_MAX_RETRIES):
+                    try:
+                        translated_combined = await asyncio.wait_for(
+                            self.translate_text(combined_text, source_lang),
+                            timeout=PerformanceConfig.TRANSLATION_TIMEOUT
+                        )
+                        break
+                    except asyncio.TimeoutError:
+                        if attempt == PerformanceConfig.TRANSLATION_MAX_RETRIES - 1:
+                            translated_combined = combined_text  # Fallback to original
+                        else:
+                            await asyncio.sleep(PerformanceConfig.TRANSLATION_RETRY_DELAY * (attempt + 1))
+                
+                # Split translated text
+                translated_parts = translated_combined.split("\n---\n")
+                
+                # Assign translations back to segments
+                batch_results = []
+                for i, seg in enumerate(batch):
+                    if i < len(translated_parts):
+                        seg.translated_text = translated_parts[i].strip()
+                    else:
+                        seg.translated_text = seg.text  # Fallback
+                    batch_results.append(seg)
+                
+                # Update progress
+                if progress and task_id is not None:
+                    completed = sum(len(b) for b in batches[:batch_idx + 1])
+                    progress.update(task_id, completed=min(completed, len(segments)))
+                
+                return batch_results
+        
+        # Process all batches
+        tasks = [translate_batch_with_semaphore(batch, idx) for idx, batch in enumerate(batches)]
+        batch_results = await asyncio.gather(*tasks)
+        
+        # Flatten results
+        for batch_result in batch_results:
+            translated_segments.extend(batch_result)
         
         return translated_segments
 
