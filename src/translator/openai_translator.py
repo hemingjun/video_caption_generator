@@ -22,6 +22,8 @@ class TranslationResult(BaseModel):
     segments: List[TranslationSegment]
     source_language: str
     target_language: str
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
 
 
 class OpenAITranslator:
@@ -41,6 +43,10 @@ class OpenAITranslator:
         self.model = self.settings.openai.model
         self.batch_size = self.settings.translation.batch_size
         self.target_language = self.settings.translation.target_language
+        
+        # Token使用统计
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
         
     def translate(
         self, 
@@ -74,6 +80,10 @@ class OpenAITranslator:
             f"Merged incomplete sentences: {len(segments)} -> {len(merged_segments)} segments"
         )
         
+        # 重置token统计
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        
         # 按批次处理
         translated_segments = []
         for i in range(0, len(merged_segments), self.batch_size):
@@ -84,10 +94,15 @@ class OpenAITranslator:
         result = TranslationResult(
             segments=translated_segments,
             source_language=source_language,
-            target_language=self.target_language
+            target_language=self.target_language,
+            input_tokens=self.total_input_tokens,
+            output_tokens=self.total_output_tokens
         )
         
-        self.logger.info(f"Translation completed: {len(translated_segments)} segments")
+        self.logger.info(
+            f"Translation completed: {len(translated_segments)} segments, "
+            f"tokens used: {self.total_input_tokens} input, {self.total_output_tokens} output"
+        )
         return result
     
     def _translate_batch(
@@ -128,6 +143,15 @@ class OpenAITranslator:
                 temperature=0.3,
                 max_tokens=4000
             )
+            
+            # 记录token使用量
+            if hasattr(response, 'usage') and response.usage:
+                self.total_input_tokens += response.usage.prompt_tokens
+                self.total_output_tokens += response.usage.completion_tokens
+                self.logger.debug(
+                    f"Batch token usage: {response.usage.prompt_tokens} input, "
+                    f"{response.usage.completion_tokens} output"
+                )
             
             # 解析响应
             content = response.choices[0].message.content

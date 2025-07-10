@@ -9,6 +9,7 @@ from src.formatter.srt_formatter import SRTFormatter
 from src.formatter.text_formatter import TextFormatter
 from src.utils.helpers import setup_logger, is_video_file, process_path_arguments
 from src.config.settings import get_settings
+from src.utils.cost_calculator import CostCalculator
 
 
 logger = setup_logger("cli")
@@ -171,6 +172,28 @@ def process(video_path: tuple, lang: str, format: str, output_dir: Path):
             click.echo("🧹 临时文件已清理")
         
         click.echo("🎉 处理完成！")
+        
+        # 计算并显示API费用
+        cost_calculator = CostCalculator(settings.api_pricing.model_dump())
+        
+        # 计算费用
+        whisper_cost = cost_calculator.calculate_whisper_cost(transcription.duration)
+        gpt_cost = 0.0
+        if translation.input_tokens and translation.output_tokens:
+            gpt_cost = cost_calculator.calculate_gpt_cost(
+                translation.input_tokens,
+                translation.output_tokens
+            )
+        
+        # 显示费用汇总
+        click.echo()
+        click.echo(cost_calculator.format_cost_summary(
+            whisper_cost=whisper_cost,
+            gpt_cost=gpt_cost,
+            duration_seconds=transcription.duration,
+            input_tokens=translation.input_tokens or 0,
+            output_tokens=translation.output_tokens or 0
+        ))
         
     except Exception as e:
         logger.error(f"处理失败: {e}")

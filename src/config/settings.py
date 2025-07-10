@@ -58,6 +58,27 @@ class LoggingConfig(BaseModel):
     file: str = Field(default="./logs/video_caption.log", description="日志文件")
 
 
+class WhisperPricing(BaseModel):
+    """Whisper API价格配置"""
+    price_per_minute: float = Field(default=0.006, description="每分钟价格")
+    currency: str = Field(default="USD", description="货币单位")
+
+
+class GPTPricing(BaseModel):
+    """GPT API价格配置"""
+    input_per_million_tokens: float = Field(default=5.0, description="输入每百万token价格")
+    output_per_million_tokens: float = Field(default=20.0, description="输出每百万token价格")
+    currency: str = Field(default="USD", description="货币单位")
+
+
+class APIPricingConfig(BaseModel):
+    """API价格配置"""
+    whisper: WhisperPricing = Field(default_factory=WhisperPricing)
+    gpt4o: GPTPricing = Field(default_factory=GPTPricing)
+    pricing_url: str = Field(default="https://openai.com/api/pricing/", description="价格页面URL")
+    last_updated: str = Field(default="2025-01-10", description="最后更新日期")
+
+
 class Settings(BaseModel):
     """应用配置"""
     openai: OpenAIConfig = Field(default_factory=OpenAIConfig)
@@ -66,6 +87,7 @@ class Settings(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     processing: ProcessingConfig = Field(default_factory=ProcessingConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
+    api_pricing: APIPricingConfig = Field(default_factory=APIPricingConfig)
 
     @classmethod
     def load_from_file(cls, config_path: Path) -> "Settings":
