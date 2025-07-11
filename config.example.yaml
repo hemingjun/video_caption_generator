@@ -1,0 +1,145 @@
+# 视频字幕生成器配置文件示例
+# 
+# 使用说明：
+# 1. 复制此文件为 config.yaml
+# 2. 设置 OPENAI_API_KEY 环境变量，或直接在文件中填写
+# 3. 根据需要调整其他配置项
+
+# ====================
+# OpenAI API 配置
+# ====================
+openai:
+  # API 密钥（必需）
+  # 方式1：从环境变量读取（推荐）
+  api_key: ${OPENAI_API_KEY}
+  # 方式2：直接填写（注意保密）
+  # api_key: sk-your-api-key-here
+  
+  # GPT 模型选择
+  # 可选：gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
+  model: gpt-4o-mini  # 推荐：性价比高
+  
+  # API 调用设置
+  max_retries: 3      # 重试次数
+  timeout: 30         # 超时时间（秒）
+
+# ====================
+# Whisper 语音识别配置
+# ====================
+whisper:
+  # 模型大小（目前使用 OpenAI API，此项不影响）
+  model_size: base
+  
+  # 设备配置（预留给本地模型）
+  device: cpu         # cpu 或 cuda
+  compute_type: int8  # int8, fp16, fp32
+  
+  # 源语言设置
+  # auto: 自动检测（推荐）
+  # 或指定语言：en, zh, ja, ko, es, fr, de, etc.
+  language: auto
+
+# ====================
+# 翻译配置
+# ====================
+translation:
+  # 目标语言（必需）
+  # 常用：zh-cn（简体中文）, zh-tw（繁体中文）, en（英语）
+  #      ja（日语）, ko（韩语）, es（西班牙语）, fr（法语）
+  target_language: zh-cn
+  
+  # 批量处理设置
+  batch_size: 10        # 每批翻译的句子数（5-20 推荐）
+  
+  # 翻译风格
+  preserve_style: true  # 保持原文风格和语气
+
+# ====================
+# 输出配置
+# ====================
+output:
+  # 输出格式
+  # srt: 只生成 SRT 字幕文件
+  # text: 只生成纯文本文件
+  # both: 同时生成两种格式（推荐）
+  format: both
+  
+  # SRT 字幕设置
+  srt_max_line_length: 42  # 每行最大字符数（中文建议 20-25）
+  
+  # 是否包含原文
+  # true: 译文下方显示原文（推荐用于学习）
+  # false: 只显示译文
+  include_original: true
+
+# ====================
+# 处理配置
+# ====================
+processing:
+  # 大文件分段处理
+  chunk_duration: 300    # 每段时长（秒），5分钟
+  
+  # 临时文件管理
+  temp_dir: ./temp       # 临时文件存放目录
+  keep_temp_files: false # 处理完成后是否保留临时文件
+
+# ====================
+# 日志配置
+# ====================
+logging:
+  # 日志级别
+  # DEBUG: 详细调试信息
+  # INFO: 一般信息（推荐）
+  # WARNING: 警告信息
+  # ERROR: 只显示错误
+  level: INFO
+  
+  # 日志文件（可选）
+  # 留空则只输出到控制台
+  # file: ./logs/video_caption.log
+  file: null  # 或指定路径
+
+# ====================
+# API 费用配置
+# ====================
+# 用于估算处理成本，价格可能会变化
+# 最新价格请查看：https://openai.com/api/pricing/
+api_pricing:
+  # Whisper API 价格
+  whisper:
+    price_per_minute: 0.006  # 美元/分钟
+    currency: USD
+  
+  # GPT-4o 价格（2025年1月）
+  gpt4o:
+    input_per_million_tokens: 5.0    # 输入：$2.50/1M tokens
+    output_per_million_tokens: 20.0  # 输出：$10.00/1M tokens
+    currency: USD
+  
+  # GPT-4o-mini 价格（更经济的选择）
+  gpt4o_mini:
+    input_per_million_tokens: 0.15   # 输入：$0.15/1M tokens
+    output_per_million_tokens: 0.60  # 输出：$0.60/1M tokens
+    currency: USD
+  
+  # 价格信息
+  pricing_url: https://openai.com/api/pricing/
+  last_updated: "2025-01-10"
+
+# ====================
+# 使用示例
+# ====================
+# 1. 处理单个视频：
+#    python cli.py process video.mp4
+#
+# 2. 处理目录中所有视频：
+#    python cli.py process ./videos/
+#
+# 3. 使用自定义配置：
+#    python cli.py process video.mp4 --config my_config.yaml
+#
+# 4. 指定输出目录和语言：
+#    python cli.py process video.mp4 --output-dir ./output --lang ja
+#
+# 5. 从断点继续：
+#    python cli.py process video.mp4 --resume

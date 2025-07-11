@@ -3,6 +3,7 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any
 import ffmpeg
+from ..utils.exceptions import ConfigurationError, FileProcessingError, AudioExtractionError
 from src.utils.helpers import setup_logger, ensure_dir, get_output_path
 from src.config.settings import get_settings
 
@@ -71,15 +72,15 @@ class AudioExtractor:
             提取的音频文件路径
         """
         if not self.check_ffmpeg():
-            raise RuntimeError("FFmpeg 未安装")
+            raise ConfigurationError("FFmpeg 未安装或不在 PATH 中", config_key="ffmpeg")
         
         if not video_path.exists():
-            raise FileNotFoundError(f"视频文件不存在: {video_path}")
+            raise FileProcessingError(f"视频文件不存在: {video_path}", file_path=str(video_path))
         
         # 获取视频信息
         info = self.get_video_info(video_path)
         if not info.get('has_audio', False):
-            raise ValueError(f"视频文件没有音频流: {video_path}")
+            raise AudioExtractionError(f"视频文件没有音频流: {video_path}", video_path=str(video_path))
         
         # 设置输出路径
         if output_path is None:
@@ -108,7 +109,7 @@ class AudioExtractor:
             
         except ffmpeg.Error as e:
             logger.error(f"音频提取失败: {e.stderr.decode()}")
-            raise RuntimeError(f"音频提取失败: {e}")
+            raise AudioExtractionError(f"音频提取失败: {e}", video_path=str(video_path)) from e
     
     def cleanup_temp_files(self):
         """清理临时文件"""

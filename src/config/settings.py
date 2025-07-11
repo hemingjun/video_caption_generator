@@ -109,11 +109,15 @@ class Settings(BaseModel):
 _settings: Optional[Settings] = None
 
 
-def get_settings() -> Settings:
-    """获取全局配置实例"""
+def get_settings(config_file: Optional[Path] = None) -> Settings:
+    """获取全局配置实例
+    
+    Args:
+        config_file: 自定义配置文件路径
+    """
     global _settings
-    if _settings is None:
-        config_path = Path("config.yaml")
+    if _settings is None or config_file is not None:
+        config_path = config_file if config_file else Path("config.yaml")
         _settings = Settings.load_from_file(config_path)
     return _settings
 

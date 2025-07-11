@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from ..config.settings import get_settings
 from ..transcriber.whisper_transcriber import TranscriptionSegment
+from ..utils.exceptions import ConfigurationError, TranslationError, APIError
 
 
 class TranslationSegment(BaseModel):
@@ -37,7 +38,7 @@ class OpenAITranslator:
         # 初始化 OpenAI 客户端
         api_key = self.settings.openai.api_key
         if not api_key:
-            raise ValueError("OpenAI API key not configured")
+            raise ConfigurationError("OpenAI API key not configured", config_key="openai.api_key")
             
         self.client = OpenAI(api_key=api_key)
         self.model = self.settings.openai.model
@@ -187,7 +188,11 @@ class OpenAITranslator:
             
         except Exception as e:
             self.logger.error(f"Translation batch failed: {str(e)}")
-            raise RuntimeError(f"Translation failed: {str(e)}") from e
+            raise TranslationError(
+                f"Translation failed: {str(e)}", 
+                source_lang=source_language,
+                target_lang=self.target_language
+            ) from e
     
     def _build_system_prompt(self, source_language: str) -> str:
         """构建系统提示
@@ -239,7 +244,7 @@ Example output: ["你好", "你好吗？"]"""
             # 尝试解析 JSON
             translations = json.loads(content)
             if not isinstance(translations, list):
-                raise ValueError("Response is not a list")
+                raise APIError("Response is not a list", api_name="OpenAI Translation")
             return [str(t) for t in translations]
         except json.JSONDecodeError:
             # 如果不是有效 JSON，尝试按行分割

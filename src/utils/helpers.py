@@ -1,25 +1,70 @@
 """工具函数模块"""
 import os
 import logging
+import logging.handlers
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import List, Optional, Union, Dict
 import hashlib
 import time
 from functools import wraps
+from datetime import datetime
 
 
-def setup_logger(name: str, level: str = "INFO") -> logging.Logger:
-    """设置日志器"""
+def setup_logger(
+    name: str, 
+    level: str = "INFO",
+    log_file: Optional[str] = None,
+    max_bytes: int = 10 * 1024 * 1024,  # 10MB
+    backup_count: int = 5,
+    console_output: bool = True
+) -> logging.Logger:
+    """设置日志器，支持文件输出和日志轮转
+    
+    Args:
+        name: 日志器名称
+        level: 日志级别
+        log_file: 日志文件路径，如果为None则只输出到控制台
+        max_bytes: 单个日志文件最大大小（字节）
+        backup_count: 保留的备份文件数量
+        console_output: 是否同时输出到控制台
+    
+    Returns:
+        配置好的日志器
+    """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper()))
     
-    if not logger.handlers:
-        handler = logging.StreamHandler()
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    # 避免重复添加处理器
+    if logger.handlers:
+        return logger
+    
+    # 日志格式
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # 控制台处理器
+    if console_output:
+        console_handler = logging.StreamHandler()
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
+    
+    # 文件处理器（带轮转）
+    if log_file:
+        # 确保日志目录存在
+        log_path = Path(log_file)
+        ensure_dir(log_path.parent)
+        
+        # 使用RotatingFileHandler实现日志轮转
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding='utf-8'
         )
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
+        file_handler.setFormatter(formatter)
+        logger.addHandler(file_handler)
     
     return logger
 
@@ -51,12 +96,29 @@ def is_video_file(file_path: Path) -> bool:
     return file_path.suffix.lower() in video_extensions
 
 
-def get_video_files(directory: Path) -> List[Path]:
-    """获取目录下所有视频文件"""
+def get_video_files(directory: Path, recursive: bool = False) -> List[Path]:
+    """获取目录下所有视频文件
+    
+    Args:
+        directory: 目录路径
+        recursive: 是否递归查找子目录
+        
+    Returns:
+        排序后的视频文件列表
+    """
     video_files = []
-    for file_path in directory.iterdir():
-        if file_path.is_file() and is_video_file(file_path):
-            video_files.append(file_path)
+    
+    if recursive:
+        # 递归查找所有视频文件
+        for file_path in directory.rglob("*"):
+            if file_path.is_file() and is_video_file(file_path):
+                video_files.append(file_path)
+    else:
+        # 只查找当前目录
+        for file_path in directory.iterdir():
+            if file_path.is_file() and is_video_file(file_path):
+                video_files.append(file_path)
+    
     return sorted(video_files)
 
 
@@ -110,6 +172,35 @@ def get_output_path(
     base_name = input_path.stem
     output_name = f"{base_name}{suffix}"
     return output_dir / output_name
+
+
+def setup_default_logger(config: Dict) -> None:
+    """根据配置设置默认日志器
+    
+    Args:
+        config: 包含日志配置的字典
+    """
+    log_config = config.get('logging', {})
+    log_level = log_config.get('level', 'INFO')
+    log_file = log_config.get('file')
+    
+    # 设置根日志器
+    root_logger = setup_logger(
+        'video_caption',
+        level=log_level,
+        log_file=log_file,
+        console_output=True
+    )
+    
+    # 设置各模块的日志器
+    modules = ['cli', 'extractor', 'transcriber', 'translator', 'formatter']
+    for module in modules:
+        setup_logger(
+            module,
+            level=log_level,
+            log_file=log_file,
+            console_output=False  # 子模块不重复输出到控制台
+        )
 
 
 def process_path_arguments(path_segments: tuple) -> Path:
