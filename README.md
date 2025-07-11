@@ -177,6 +177,31 @@ python cli.py extract video.mp4
 python cli.py info
 ```
 
+## 🚀 未来计划
+
+### 近期目标
+1. **并发处理优化**
+   - 支持多视频同时处理 (`--workers` 参数)
+   - 智能控制并发数，避免 API 限流
+   - 预计性能提升 3-5 倍
+
+2. **API 服务模式**
+   - RESTful API 接口
+   - 支持异步任务处理
+   - 便于集成到其他系统
+
+3. **自动化增强**
+   - 文件夹监控模式
+   - 处理结果自动上传
+   - 支持 Webhook 通知
+
+### 长期规划
+- **工具平台集成** - 作为个人工具平台的字幕处理模块
+- **插件系统** - 支持自定义处理流程
+- **更多输入源** - 支持 URL、云存储等
+
+💡 有想法或需求？欢迎在 [Issues](https://github.com/hemingjun/video_caption_generator/issues) 中讨论！
+
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
