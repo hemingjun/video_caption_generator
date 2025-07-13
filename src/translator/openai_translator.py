@@ -130,8 +130,8 @@ class OpenAITranslator:
         # 构建系统提示
         system_prompt = self._build_system_prompt(source_language)
         
-        # 构建用户消息
-        user_message = self._build_batch_message(texts)
+        # 构建用户消息（现在包含时长信息）
+        user_message = self._build_batch_message(segments)
         
         try:
             # 调用 OpenAI API
@@ -156,7 +156,9 @@ class OpenAITranslator:
             
             # 解析响应
             content = response.choices[0].message.content
-            self.logger.debug(f"API response: {content}")
+            
+            # 提升日志级别以便调试
+            self.logger.info(f"API response received, length: {len(content)} chars")
             
             translations = self._parse_translations(content)
             self.logger.info(f"Parsed {len(translations)} translations")
@@ -204,32 +206,57 @@ class OpenAITranslator:
             系统提示
         """
         target_lang_name = self._get_language_name(self.target_language)
+        target_speech_rate = self.settings.translation.target_speech_rate
         
         prompt = f"""You are a professional translator specializing in video subtitles.
 Translate the following text segments from {source_language} to {target_lang_name}.
 
+IMPORTANT: Each segment comes with its available duration in seconds. You MUST ensure your translation can be spoken naturally within this time limit.
+
 Requirements:
 1. Maintain the original meaning and tone
-2. Keep translations concise for subtitle display
-3. Preserve proper nouns and technical terms appropriately
-4. Return translations in the exact same order as input
-5. Output format: JSON array of translated strings only
+2. Keep translations concise - they must fit within the given time duration
+3. Target speech rate: {target_speech_rate} characters per minute for {target_lang_name}
+4. If the original text is too long for the duration, summarize appropriately
+5. Preserve proper nouns and technical terms
+6. Add appropriate punctuation based on semantic understanding and sentence structure
+   - Even if the original lacks punctuation, add it where natural pauses occur
+   - Only use these punctuation marks: ! ? … , . -
+   - For Chinese: use ！？…，。— (full-width versions)
+7. Return translations in the exact same order as input
+8. Output format: JSON array of translated strings only
 
-Example input: ["Hello", "How are you?"]
-Example output: ["你好", "你好吗？"]"""
+Calculation guide:
+- {target_speech_rate} chars/min = {target_speech_rate/60:.1f} chars/second
+- For a 3-second segment, aim for ~{target_speech_rate/60*3:.0f} characters
+
+Example input: [{{"text": "Hello everyone, welcome to our presentation", "duration": 2.5}}]
+Example output: ["大家好，欢迎光临"]  (8 characters for 2.5 seconds)"""
         
         return prompt
     
-    def _build_batch_message(self, texts: List[str]) -> str:
+    def _build_batch_message(self, segments: List[TranscriptionSegment]) -> str:
         """构建批量翻译消息
         
         Args:
-            texts: 待翻译文本列表
+            segments: 转录片段列表
             
         Returns:
             JSON 格式的消息
         """
-        return json.dumps(texts, ensure_ascii=False)
+        # 计算每个句子的可用时长（减去间隔时间）
+        gap_duration = self.settings.translation.gap_duration
+        
+        messages = []
+        for seg in segments:
+            # 可用时长 = 总时长 - 间隔时间，但不能小于0.5秒
+            available_duration = max(0.5, (seg.end - seg.start) - gap_duration)
+            messages.append({
+                "text": seg.text,
+                "duration": round(available_duration, 1)
+            })
+        
+        return json.dumps(messages, ensure_ascii=False)
     
     def _parse_translations(self, content: str) -> List[str]:
         """解析翻译响应
@@ -240,16 +267,62 @@ Example output: ["你好", "你好吗？"]"""
         Returns:
             翻译文本列表
         """
+        # 记录原始响应以便调试
+        self.logger.debug(f"Raw API response: {content[:500]}..." if len(content) > 500 else f"Raw API response: {content}")
+        
+        # 检查并处理markdown代码块
+        if "```json" in content and "```" in content:
+            # 提取JSON内容
+            import re
+            json_match = re.search(r'```json\s*\n?(.+?)\n?```', content, re.DOTALL)
+            if json_match:
+                content = json_match.group(1).strip()
+                self.logger.info("检测到markdown代码块，已提取JSON内容")
+        
         try:
             # 尝试解析 JSON
             translations = json.loads(content)
+            
+            # 处理嵌套的JSON结构
+            if isinstance(translations, str):
+                # 可能是双重编码的JSON
+                try:
+                    translations = json.loads(translations)
+                except:
+                    pass
+            
             if not isinstance(translations, list):
-                raise APIError("Response is not a list", api_name="OpenAI Translation")
-            return [str(t) for t in translations]
-        except json.JSONDecodeError:
+                self.logger.error(f"Response is not a list, got type: {type(translations)}")
+                raise APIError(f"Response is not a list, got: {type(translations).__name__}", api_name="OpenAI Translation")
+            
+            # 验证每个翻译项
+            result = []
+            for idx, item in enumerate(translations):
+                if isinstance(item, str):
+                    # 检查是否包含JSON格式
+                    if item.strip().startswith('[') or item.strip().startswith('{'):
+                        self.logger.warning(f"Translation item {idx} contains JSON-like content: {item[:100]}")
+                    result.append(item)
+                else:
+                    self.logger.warning(f"Translation item {idx} is not a string: {type(item).__name__}")
+                    result.append(str(item))
+            
+            self.logger.info(f"Successfully parsed {len(result)} translations")
+            return result
+            
+        except json.JSONDecodeError as e:
+            self.logger.error(f"JSON decode error: {e}")
+            self.logger.error(f"Failed to parse content: {content[:200]}...")
+            
             # 如果不是有效 JSON，尝试按行分割
             lines = content.strip().split('\n')
-            return [line.strip() for line in lines if line.strip()]
+            result = [line.strip() for line in lines if line.strip() and not line.strip().startswith('```')]
+            
+            if result:
+                self.logger.warning(f"Fallback to line splitting, got {len(result)} lines")
+                return result
+            else:
+                raise APIError(f"Failed to parse translations from response", api_name="OpenAI Translation")
     
     def _get_language_name(self, code: str) -> str:
         """获取语言名称

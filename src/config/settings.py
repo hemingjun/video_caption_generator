@@ -36,6 +36,8 @@ class TranslationConfig(BaseModel):
     target_language: str = Field(default="zh-cn", description="目标语言")
     batch_size: int = Field(default=10, description="批量大小")
     preserve_style: bool = Field(default=True, description="保持风格")
+    target_speech_rate: int = Field(default=240, description="目标语速（字/分钟）")
+    gap_duration: float = Field(default=0.5, description="句子间隔时间（秒）")
 
 
 class OutputConfig(BaseModel):

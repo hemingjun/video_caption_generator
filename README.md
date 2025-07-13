@@ -197,10 +197,6 @@ python cli.py info
 
 ### 长期规划
 - **工具平台集成** - 作为个人工具平台的字幕处理模块
-- **插件系统** - 支持自定义处理流程
-- **更多输入源** - 支持 URL、云存储等
-
-💡 有想法或需求？欢迎在 [Issues](https://github.com/hemingjun/video_caption_generator/issues) 中讨论！
 
 ## 🤝 贡献
 

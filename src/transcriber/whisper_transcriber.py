@@ -9,7 +9,7 @@ import math
 
 from ..config.settings import get_settings
 from ..utils.helpers import get_file_size, ensure_dir
-from ..utils.exceptions import TranscriptionError, AudioExtractionError
+from ..utils.exceptions import ConfigurationError, TranscriptionError, AudioExtractionError
 
 
 class TranscriptionSegment(BaseModel):
