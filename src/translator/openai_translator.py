@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from ..config.settings import get_settings
 from ..transcriber.whisper_transcriber import TranscriptionSegment
 from ..utils.exceptions import ConfigurationError, TranslationError, APIError
+from .paragraph_detector import ParagraphDetector, Paragraph
+from .timestamp_redistributor import TimestampRedistributor
 
 
 class TranslationSegment(BaseModel):
@@ -49,6 +51,12 @@ class OpenAITranslator:
         self.total_input_tokens = 0
         self.total_output_tokens = 0
         
+        # 段落模式组件
+        self.paragraph_mode = self.settings.translation.paragraph_mode
+        if self.paragraph_mode:
+            self.paragraph_detector = ParagraphDetector()
+            self.timestamp_redistributor = TimestampRedistributor()
+        
     def translate(
         self, 
         segments: List[TranscriptionSegment],
@@ -70,11 +78,26 @@ class OpenAITranslator:
                 target_language=self.target_language
             )
         
-        self.logger.info(
-            f"Starting translation: {len(segments)} segments, "
-            f"{source_language} -> {self.target_language}"
-        )
-        
+        # 根据配置选择翻译模式
+        if self.paragraph_mode:
+            self.logger.info(
+                f"Starting paragraph mode translation: {len(segments)} segments, "
+                f"{source_language} -> {self.target_language}"
+            )
+            return self._translate_paragraph_mode(segments, source_language)
+        else:
+            self.logger.info(
+                f"Starting traditional translation: {len(segments)} segments, "
+                f"{source_language} -> {self.target_language}"
+            )
+            return self._translate_traditional_mode(segments, source_language)
+    
+    def _translate_traditional_mode(
+        self,
+        segments: List[TranscriptionSegment],
+        source_language: str
+    ) -> TranslationResult:
+        """传统逐句翻译模式（原有逻辑）"""
         # 合并不完整的句子
         merged_segments = self._merge_incomplete_segments(segments)
         self.logger.info(
@@ -494,3 +517,174 @@ Example output: ["大家好，欢迎光临"]  (8 characters for 2.5 seconds)"""
             )
         
         return aligned_segments
+    
+    def _translate_paragraph_mode(
+        self,
+        segments: List[TranscriptionSegment],
+        source_language: str
+    ) -> TranslationResult:
+        """段落翻译模式
+        
+        Args:
+            segments: 转录片段列表
+            source_language: 源语言
+            
+        Returns:
+            翻译结果
+        """
+        # 检测段落
+        paragraphs = self.paragraph_detector.detect_paragraphs(segments)
+        self.logger.info(f"检测到 {len(paragraphs)} 个段落")
+        
+        # 合并短段落
+        paragraphs = self.paragraph_detector.merge_short_paragraphs(paragraphs)
+        self.logger.info(f"合并后 {len(paragraphs)} 个段落")
+        
+        # 重置token统计
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        
+        # 翻译段落并重分配时间戳
+        all_translated_segments = []
+        
+        for i, paragraph in enumerate(paragraphs):
+            self.logger.info(
+                f"翻译段落 {i+1}/{len(paragraphs)}: "
+                f"时长 {paragraph.duration:.1f}秒, "
+                f"文本长度 {len(paragraph.text)} 字符"
+            )
+            
+            # 翻译整个段落
+            translated_text = self._translate_paragraph(
+                paragraph.text, 
+                source_language,
+                paragraph.duration
+            )
+            
+            # 重新分配时间戳
+            if self.settings.translation.redistribute_timestamps:
+                redistributed_dicts = self.timestamp_redistributor.redistribute_timestamps(
+                    translated_text,
+                    paragraph.start,
+                    paragraph.end,
+                    paragraph.segments
+                )
+                # 转换为 TranslationSegment 对象
+                for seg_dict in redistributed_dicts:
+                    segment = TranslationSegment(
+                        original=seg_dict["original"],
+                        translated=seg_dict["translated"],
+                        start=seg_dict["start"],
+                        end=seg_dict["end"]
+                    )
+                    all_translated_segments.append(segment)
+            else:
+                # 不重分配，使用原始时间戳
+                segment = TranslationSegment(
+                    original=paragraph.text,
+                    translated=translated_text,
+                    start=paragraph.start,
+                    end=paragraph.end
+                )
+                all_translated_segments.append(segment)
+        
+        result = TranslationResult(
+            segments=all_translated_segments,
+            source_language=source_language,
+            target_language=self.target_language,
+            input_tokens=self.total_input_tokens,
+            output_tokens=self.total_output_tokens
+        )
+        
+        self.logger.info(
+            f"段落模式翻译完成: {len(all_translated_segments)} 个片段, "
+            f"tokens 使用: {self.total_input_tokens} 输入, {self.total_output_tokens} 输出"
+        )
+        return result
+    
+    def _translate_paragraph(
+        self,
+        paragraph_text: str,
+        source_language: str,
+        duration: float
+    ) -> str:
+        """翻译单个段落
+        
+        Args:
+            paragraph_text: 段落文本
+            source_language: 源语言
+            duration: 段落时长
+            
+        Returns:
+            翻译后的文本
+        """
+        # 构建系统提示
+        system_prompt = self._build_paragraph_system_prompt(source_language, duration)
+        
+        try:
+            # 调用 OpenAI API
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": paragraph_text}
+                ],
+                temperature=0.3,
+                max_tokens=4000
+            )
+            
+            # 记录token使用量
+            if hasattr(response, 'usage') and response.usage:
+                self.total_input_tokens += response.usage.prompt_tokens
+                self.total_output_tokens += response.usage.completion_tokens
+            
+            # 获取翻译结果
+            translated_text = response.choices[0].message.content.strip()
+            
+            self.logger.debug(
+                f"段落翻译完成: 原文 {len(paragraph_text)} 字符 -> "
+                f"译文 {len(translated_text)} 字符"
+            )
+            
+            return translated_text
+            
+        except Exception as e:
+            self.logger.error(f"段落翻译失败: {str(e)}")
+            raise TranslationError(
+                f"段落翻译失败: {str(e)}", 
+                source_lang=source_language,
+                target_lang=self.target_language
+            ) from e
+    
+    def _build_paragraph_system_prompt(self, source_language: str, duration: float) -> str:
+        """构建段落翻译的系统提示
+        
+        Args:
+            source_language: 源语言
+            duration: 段落时长
+            
+        Returns:
+            系统提示
+        """
+        target_lang_name = self._get_language_name(self.target_language)
+        target_speech_rate = self.settings.translation.target_speech_rate
+        max_chars = int(duration * target_speech_rate / 60)
+        
+        prompt = f"""You are a professional subtitle translator. Translate the following paragraph from {source_language} to {target_lang_name}.
+
+This is a complete paragraph with duration of {duration:.1f} seconds. Please:
+
+1. Translate the ENTIRE paragraph as a coherent whole
+2. Reorganize sentences for natural flow in {target_lang_name}
+3. Maintain the overall meaning while adapting to {target_lang_name} expression habits
+4. Use appropriate punctuation to create natural pauses
+5. Target approximately {max_chars} characters (based on {target_speech_rate} chars/min speech rate)
+6. The translation should be readable within {duration:.1f} seconds
+
+Important:
+- Focus on conveying the complete meaning naturally, not word-for-word translation
+- Ensure the translation reads smoothly when spoken aloud
+- Add punctuation where natural pauses occur in speech
+- Return ONLY the translated text, no explanations or metadata"""
+        
+        return prompt

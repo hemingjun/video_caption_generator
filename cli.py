@@ -98,8 +98,18 @@ def extract(video_path: tuple, output: Path, sample_rate: int):
 @click.option('--resume', is_flag=True, help='从断点继续处理')
 @click.option('--config', '-c', type=click.Path(exists=True, path_type=Path),
               help='自定义配置文件路径')
+@click.option('--no-paragraph-mode', is_flag=True, 
+              help='禁用段落模式，使用传统逐句翻译模式')
+@click.option('--paragraph-silence', type=float,
+              help='段落分隔的静音时长（秒）')
+@click.option('--paragraph-max-duration', type=float,
+              help='单个段落最大时长（秒）')
+@click.option('--no-redistribute-timestamps', is_flag=True,
+              help='禁用时间戳重分配')
 def process(video_path: tuple, lang: str, format: str, output_dir: Path, 
-           recursive: bool, resume: bool, config: Path):
+           recursive: bool, resume: bool, config: Path,
+           no_paragraph_mode: bool, paragraph_silence: float,
+           paragraph_max_duration: float, no_redistribute_timestamps: bool):
     """处理视频生成字幕（完整流程）
     
     示例：
@@ -122,6 +132,23 @@ def process(video_path: tuple, lang: str, format: str, output_dir: Path,
         global settings
         settings = get_settings(config_file=config)
         logger.info(f"使用配置文件: {config}")
+    
+    # 应用命令行参数覆盖配置
+    if no_paragraph_mode:
+        settings.translation.paragraph_mode = False
+        logger.info("使用传统逐句翻译模式")
+    
+    if paragraph_silence is not None:
+        settings.translation.paragraph_silence_threshold = paragraph_silence
+        logger.info(f"段落静音阈值设置为: {paragraph_silence}秒")
+    
+    if paragraph_max_duration is not None:
+        settings.translation.paragraph_max_duration = paragraph_max_duration
+        logger.info(f"段落最大时长设置为: {paragraph_max_duration}秒")
+    
+    if no_redistribute_timestamps:
+        settings.translation.redistribute_timestamps = False
+        logger.info("禁用时间戳重分配")
     
     # 处理路径参数
     try:
@@ -300,7 +327,7 @@ def process_single_video(
                 )
         else:
             # 从断点恢复转录结果
-            from src.models.transcription import TranscriptionResult, TranscriptionSegment
+            from src.transcriber.whisper_transcriber import TranscriptionResult, TranscriptionSegment
             trans_data = checkpoint_data['state']['transcription']
             segments = [TranscriptionSegment(**s) for s in trans_data['segments']]
             transcription = TranscriptionResult(
@@ -332,7 +359,7 @@ def process_single_video(
                 )
         else:
             # 从断点恢复翻译结果
-            from src.models.translation import TranslationResult
+            from src.translator.openai_translator import TranslationResult
             translation = TranslationResult(
                 segments=translation.segments,  # 需要保存和恢复
                 input_tokens=checkpoint_data['state'].get('input_tokens'),
@@ -401,12 +428,21 @@ def info():
     click.echo(f"  - 输出格式: {settings.output.format}")
     click.echo(f"  - 临时目录: {settings.processing.temp_dir}")
     
+    # 段落模式配置
+    click.echo("\n📝 段落模式配置:")
+    click.echo(f"  - 段落模式: {'启用' if settings.translation.paragraph_mode else '禁用'}")
+    if settings.translation.paragraph_mode:
+        click.echo(f"  - 段落静音阈值: {settings.translation.paragraph_silence_threshold}秒")
+        click.echo(f"  - 段落最大时长: {settings.translation.paragraph_max_duration}秒")
+        click.echo(f"  - 段落最小时长: {settings.translation.paragraph_min_duration}秒")
+        click.echo(f"  - 时间戳重分配: {'启用' if settings.translation.redistribute_timestamps else '禁用'}")
+    
     # 检查 FFmpeg
     extractor = AudioExtractor()
     if extractor.check_ffmpeg():
-        click.echo("✅ FFmpeg 已安装")
+        click.echo("\n✅ FFmpeg 已安装")
     else:
-        click.echo("❌ FFmpeg 未安装，请先安装 FFmpeg")
+        click.echo("\n❌ FFmpeg 未安装，请先安装 FFmpeg")
 
 
 if __name__ == '__main__':

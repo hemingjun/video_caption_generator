@@ -10,6 +10,7 @@
 - 💰 实时显示 API 使用费用
 - 📁 支持批量处理整个文件夹
 - 🔄 断点续传，中断后可继续
+- 🎯 **新增：段落式智能翻译** - 生成更流畅自然的字幕
 
 ## 🚀 快速开始
 
@@ -87,6 +88,12 @@ python cli.py process video.mp4 --config my_config.yaml
 
 # 从上次中断的地方继续
 python cli.py process video.mp4 --resume
+
+# 使用传统逐句翻译模式（关闭段落模式）
+python cli.py process video.mp4 --no-paragraph-mode
+
+# 自定义段落分隔参数
+python cli.py process video.mp4 --paragraph-silence 2.0 --paragraph-max-duration 45
 ```
 
 ## ⚙️ 配置说明
@@ -102,6 +109,12 @@ openai:
 translation:
   target_language: zh-cn      # 目标语言
   batch_size: 10             # 批量翻译大小
+  
+  # 段落模式配置（新功能）
+  paragraph_mode: true        # 启用段落模式
+  paragraph_silence_threshold: 1.5  # 段落分隔的静音时长（秒）
+  paragraph_max_duration: 30.0      # 单个段落最大时长（秒）
+  redistribute_timestamps: true     # 智能重分配时间戳
 
 output:
   format: both               # 输出格式：srt/text/both
@@ -151,6 +164,16 @@ output:
 - `srt_max_line_length`: 每行最大字符数
 - `include_original`: 是否显示原文
 
+### 5. 什么是段落模式？
+
+段落模式是一种新的翻译方式，它会：
+- 根据语音停顿识别自然段落
+- 将整个段落作为上下文进行翻译
+- 智能重新分配时间戳
+- 生成更流畅、更符合目标语言表达习惯的字幕
+
+这对于中文等语言特别有用，能避免逐句翻译的生硬感。
+
 ## 📝 命令参考
 
 ### process 命令
@@ -159,12 +182,16 @@ output:
 python cli.py process [视频路径] [选项]
 
 选项：
-  --lang, -l          目标语言 (默认: zh-cn)
-  --format, -f        输出格式 [srt|text|both] (默认: both)
-  --output-dir, -o    输出目录 (默认: 视频同目录)
-  --recursive, -r     递归处理子目录
-  --resume           从断点继续
-  --config, -c       自定义配置文件
+  --lang, -l                    目标语言 (默认: zh-cn)
+  --format, -f                  输出格式 [srt|text|both] (默认: both)
+  --output-dir, -o              输出目录 (默认: 视频同目录)
+  --recursive, -r               递归处理子目录
+  --resume                      从断点继续
+  --config, -c                  自定义配置文件
+  --no-paragraph-mode           禁用段落模式，使用传统逐句翻译
+  --paragraph-silence           段落分隔的静音时长（秒）
+  --paragraph-max-duration      单个段落最大时长（秒）
+  --no-redistribute-timestamps  禁用时间戳重分配
 ```
 
 ### 其他命令
@@ -177,7 +204,15 @@ python cli.py extract video.mp4
 python cli.py info
 ```
 
-## 🚀 未来计划
+## 🚀 最近更新
+
+### v1.1.0 - 段落式智能翻译 (2025-01)
+- ✅ 新增段落模式：基于语音停顿识别自然段落
+- ✅ 智能时间戳重分配：根据译文长度和标点重新分配时间
+- ✅ 更流畅的翻译：整体理解段落含义，生成自然的目标语言表达
+- ✅ 可配置参数：支持自定义段落检测和时间戳分配策略
+
+## 🎯 未来计划
 
 ### 近期目标
 1. **并发处理优化**

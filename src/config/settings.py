@@ -38,6 +38,26 @@ class TranslationConfig(BaseModel):
     preserve_style: bool = Field(default=True, description="保持风格")
     target_speech_rate: int = Field(default=240, description="目标语速（字/分钟）")
     gap_duration: float = Field(default=0.5, description="句子间隔时间（秒）")
+    
+    # 段落模式配置
+    paragraph_mode: bool = Field(default=True, description="是否启用段落模式")
+    paragraph_silence_threshold: float = Field(default=1.5, description="段落分隔的静音时长（秒）")
+    paragraph_max_duration: float = Field(default=30.0, description="单个段落最大时长（秒）")
+    paragraph_min_duration: float = Field(default=3.0, description="单个段落最小时长（秒）")
+    
+    # 时间戳重分配配置
+    redistribute_timestamps: bool = Field(default=True, description="是否重新分配时间戳")
+    sentence_min_gap: float = Field(default=0.5, description="句子之间的最小间隔（秒）")
+    punctuation_pause_weights: Dict[str, float] = Field(
+        default={
+            "。": 1.0, "！": 1.0, "？": 1.0,  # 句号类
+            "，": 0.5, "；": 0.7,  # 逗号类  
+            "…": 0.8,  # 省略号
+            ".": 1.0, "!": 1.0, "?": 1.0,  # 英文句号类
+            ",": 0.5, ";": 0.7  # 英文逗号类
+        },
+        description="不同标点的停顿权重"
+    )
 
 
 class OutputConfig(BaseModel):
